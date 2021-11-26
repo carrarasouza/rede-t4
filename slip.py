@@ -43,6 +43,7 @@ class Enlace:
     def __init__(self, linha_serial):
         self.linha_serial = linha_serial
         self.linha_serial.registrar_recebedor(self.__raw_recv)
+        self.buffer = b''
 
     def registrar_recebedor(self, callback):
         self.callback = callback
@@ -51,7 +52,10 @@ class Enlace:
         # TODO: Preencha aqui com o código para enviar o datagrama pela linha
         # serial, fazendo corretamente a delimitação de quadros e o escape de
         # sequências especiais, de acordo com o protocolo CamadaEnlace (RFC 1055).
-        pass
+        datagrama = datagrama.replace(b'\xdb', b'\xdb\xdd')
+        datagrama = datagrama.replace(b'\xc0', b'\xdb\xdc')
+
+        self.linha_serial.enviar(b'\xc0' + datagrama + b'\xc0')
 
     def __raw_recv(self, dados):
         # TODO: Preencha aqui com o código para receber dados da linha serial.
@@ -61,4 +65,58 @@ class Enlace:
         # vir quebrado de várias formas diferentes - por exemplo, podem vir
         # apenas pedaços de um quadro, ou um pedaço de quadro seguido de um
         # pedaço de outro, ou vários quadros de uma vez só.
-        pass
+        if len(dados) > 0 and dados[0] == 192:
+            dados = dados[1:]
+            if len(self.buffer) > 0:
+                self.buffer = self.buffer.replace(b'\xdb\xdc', b'\xc0')
+                self.buffer = self.buffer.replace(b'\xdb\xdd', b'\xdb')
+                self.callback(self.buffer)
+                self.buffer = b''
+        
+        if len(dados) > 0 and dados[0] == 219:
+            self.buffer = b"".join([self.buffer, b'\xdb'])
+
+            dados = dados[1:]
+
+        if len(dados) > 0 and dados[0] == 221:
+            self.buffer = b"".join([self.buffer, b'\xdd'])
+
+            dados = dados[1:]
+
+        dados_split = dados.split(b'\xc0')
+
+        for i in range(len(dados_split) - 1):
+            if len(self.buffer) > 0:
+                self.buffer = b''.join([self.buffer, dados_split[i]])
+                self.buffer = self.buffer.replace(b'\xdb\xdc', b'\xc0')
+                self.buffer = self.buffer.replace(b'\xdb\xdd', b'\xdb')
+                try:
+                    self.callback(self.buffer)
+                except:
+                    # ignora a exceção, mas mostra na tela
+                    import traceback
+                    traceback.print_exc()
+                finally:
+                    # faça aqui a limpeza necessária para garantir que não vão sobrar
+                    # pedaços do datagrama em nenhum buffer mantido por você
+                    self.buffer = b''
+                
+
+            else:
+                self.buffer =  b''.join([self.buffer, dados_split[i]])
+                if len(self.buffer) > 0:
+                    self.buffer = self.buffer.replace(b'\xdb\xdc', b'\xc0')
+                    self.buffer = self.buffer.replace(b'\xdb\xdd', b'\xdb')
+                    try:
+                        self.callback(self.buffer)
+                    except:
+                        # ignora a exceção, mas mostra na tela
+                        import traceback
+                        traceback.print_exc()
+                    finally:
+                        # faça aqui a limpeza necessária para garantir que não vão sobrar
+                        # pedaços do datagrama em nenhum buffer mantido por você
+                        self.buffer = b''
+                
+        
+        self.buffer = b''.join([self.buffer, dados_split[-1]])
